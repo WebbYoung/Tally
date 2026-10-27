@@ -56,6 +56,8 @@ import {
   executePlan,
   formatValue,
   identityFingerprint,
+  mappingError,
+  metricDependencyChanges,
   reconcile,
 } from "./domain/engine";
 import { demoProject } from "./domain/demo";
@@ -1174,6 +1176,11 @@ export default function App() {
                         <button
                           className={`button ${s.confirmed ? "secondary" : "primary"}`}
                           onClick={() => {
+                            const mappingProblem = mappingError(s);
+                            if (mappingProblem) {
+                              setError(mappingProblem);
+                              return;
+                            }
                             if (s.role !== "feedback" && !s.mapping.id) {
                               setError("报名与签到表必须指定可靠的人员标识。");
                               return;
@@ -1834,6 +1841,16 @@ export default function App() {
                                   {c.metric} · 来源{" "}
                                   {(comparison ?? latest).label}
                                 </small>
+                                {check.stale && (
+                                  <small>
+                                    需重核原因：
+                                    {metricDependencyChanges(
+                                      c.metric,
+                                      comparison ?? latest,
+                                      latest,
+                                    ).join("；")}
+                                  </small>
+                                )}
                               </div>
                               <div className="claim-badges">
                                 <Badge tone={check.numeric ? "green" : "red"}>
@@ -1858,7 +1875,7 @@ export default function App() {
                         })}
                       </section>
                       <p className="subtle">
-                        数字与引用采用程序规则核验。因果表达采用关键词提示，可能误报或漏报，不代表自动识别因果关系。依赖变化检查采用保守策略，相关源文件或口径变化会要求重新核对。
+                        数字与引用采用程序规则核验。因果表达采用关键词提示，可能误报或漏报，不代表自动识别因果关系。只核对每个指标实际依赖的表格和口径；相关文件内容变化时仍保守要求重核，并说明原因。
                       </p>
                     </>
                   )}

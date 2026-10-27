@@ -29,6 +29,21 @@ export function hashText(text: string): Promise<string> {
 export const identityFingerprint = (project: Project) =>
   hashText(JSON.stringify({ engine: ENGINE_VERSION, project }));
 
+export function mappingError(source: Source): string | null {
+  const fields = Object.values(source.mapping).filter((v): v is string =>
+    Boolean(v),
+  );
+  if (fields.some((h) => !source.headers.includes(h)))
+    return "映射引用了不存在的列。";
+  if (new Set(fields).size !== fields.length)
+    return "同一原始列不能同时映射为多个字段。";
+  if (source.role !== "feedback" && !source.mapping.id)
+    return "报名与签到表必须指定可靠的人员标识。";
+  if (source.role === "feedback" && !source.mapping.rating)
+    return "反馈表必须指定满意度评分列。";
+  return null;
+}
+
 export function reconcile(project: Project): Result {
   const issues: Issue[] = [];
   const warnings: string[] = [];
@@ -90,9 +105,11 @@ export function reconcile(project: Project): Result {
   }
   function unique(role: Source["role"]): Person[] {
     const grouped = new Map<string, Person[]>();
-    byRole[role].forEach((p) =>
-      grouped.set(p.id, [...(grouped.get(p.id) ?? []), p]),
-    );
+    byRole[role].forEach((p) => {
+      const rows = grouped.get(p.id);
+      if (rows) rows.push(p);
+      else grouped.set(p.id, [p]);
+    });
     return [...grouped.values()].map((rows) => {
       if (rows.length > 1) {
         const sources = new Set(rows.map((p) => p.ref.sourceId));
@@ -290,6 +307,8 @@ export function reconcile(project: Project): Result {
     );
   if (project.sources.some((s) => !s.confirmed))
     warnings.push("请确认所有表格的字段映射与处理口径。");
+  const invalidMapping = project.sources.some((s) => Boolean(mappingError(s)));
+  if (invalidMapping) warnings.push("字段映射不完整或重复，请重新确认映射。");
   return {
     metrics,
     issues,
@@ -300,6 +319,7 @@ export function reconcile(project: Project): Result {
     eligibleFeedback,
     ready:
       hasRequired &&
+      !invalidMapping &&
       !issues.some((i) => i.kind === "missingId" || i.kind === "overlap") &&
       project.sources.every((s) => s.confirmed),
     warnings,
@@ -373,18 +393,30 @@ export function executePlan(
   )
     throw new Error("缺少反馈表，请导入后再分析。");
   const groupBy = plan.groupBy;
-  const names = [...new Set(result.registered.map((p) => p[groupBy]))];
-  const attIds = new Set(result.attendees.map((p) => p.id));
+  const groups = new Map<string, Person[]>();
+  for (const p of result.registered) {
+    const bucket = groups.get(p[groupBy]);
+    if (bucket) bucket.push(p);
+    else groups.set(p[groupBy], [p]);
+  }
+  if (groups.size > 200)
+    throw new Error("分组超过 200 类，请检查渠道或年级是否误映射到人员标识。");
+  const attendanceById = new Map(result.attendees.map((p) => [p.id, p]));
+  const feedbackById = new Map(result.eligibleFeedback.map((p) => [p.id, p]));
   const custom = new Set(project.policy.invitedIds.map(normalizeId));
-  const data = names.map((name) => {
-    const regs = result.registered.filter((p) => p[groupBy] === name);
-    const regIds = new Set(regs.map((p) => p.id));
-    const arrived = result.attendees.filter((p) => regIds.has(p.id));
+  const data = [...groups].map(([name, regs]) => {
+    const arrived = regs.flatMap((p) => {
+      const a = attendanceById.get(p.id);
+      return a ? [a] : [];
+    });
     const invited = arrived.filter(
       (p) => project.policy.invitations !== "custom" || custom.has(p.id),
     );
     const invitedSet = new Set(invited.map((p) => p.id));
-    const feedback = result.eligibleFeedback.filter((p) => regIds.has(p.id));
+    const feedback = regs.flatMap((p) => {
+      const f = feedbackById.get(p.id);
+      return f ? [f] : [];
+    });
     const replied = feedback.filter((p) => invitedSet.has(p.id));
     const scores = feedback.filter((p) => p.rating !== null);
     const source =
@@ -427,11 +459,13 @@ export function executePlan(
     };
   });
   return data.sort((a, b) =>
-    a.value === null
-      ? 1
-      : b.value === null
-        ? -1
-        : (a.value - b.value) * (plan.order === "desc" ? -1 : 1),
+    a.value === null && b.value === null
+      ? 0
+      : a.value === null
+        ? 1
+        : b.value === null
+          ? -1
+          : (a.value - b.value) * (plan.order === "desc" ? -1 : 1),
   );
 }
 
@@ -466,26 +500,98 @@ export function checkClaim(claim: Claim, origin: Snapshot, current: Snapshot) {
     claim.snapshotId === origin.id;
   const latest = current.result.metrics[claim.metric];
   const dependencyChanged =
-    JSON.stringify({
-      value: expected.value,
-      refs: expected.evidence,
-      den: expected.denominatorEvidence,
-      policy: origin.project.policy,
-      sources: origin.project.sources.map((s) => [s.hash, s.mapping]),
-    }) !==
-    JSON.stringify({
-      value: latest.value,
-      refs: latest.evidence,
-      den: latest.denominatorEvidence,
-      policy: current.project.policy,
-      sources: current.project.sources.map((s) => [s.hash, s.mapping]),
-    });
+    metricDependencyChanges(claim.metric, origin, current).length > 0;
   return {
     numeric,
     refsValid,
     stale: dependencyChanged,
     causalReview: /导致|因为|造成|引起|使得/.test(claim.text),
   };
+}
+export function metricDependencyChanges(
+  key: MetricKey,
+  before: Snapshot,
+  after: Snapshot,
+): string[] {
+  const roles: Source["role"][] =
+    key === "registered"
+      ? ["registration"]
+      : key === "attended" || key === "duplicates"
+        ? ["attendance"]
+        : key === "attendanceRate" || key === "walkIns"
+          ? ["registration", "attendance"]
+          : key === "satisfaction"
+            ? ["attendance", "feedback"]
+            : [
+                "attendance",
+                "feedback",
+                ...(before.project.policy.invitations ===
+                  "registeredAttendees" ||
+                after.project.policy.invitations === "registeredAttendees"
+                  ? ["registration" as const]
+                  : []),
+              ];
+  const reasons: string[] = [];
+  for (const role of roles) {
+    const pick = (s: Snapshot) =>
+      s.project.sources
+        .filter((x) => x.role === role)
+        .map((x) => ({
+          hash: x.hash,
+          sheet: x.sheet,
+          mapping: x.mapping,
+          confirmed: x.confirmed,
+        }));
+    if (JSON.stringify(pick(before)) !== JSON.stringify(pick(after)))
+      reasons.push(
+        { registration: "报名表", attendance: "签到表", feedback: "反馈表" }[
+          role
+        ] + "或字段映射变化",
+      );
+  }
+  const policy = (s: Snapshot) => ({
+    duplicate: s.project.policy.duplicate,
+    excluded: s.project.policy.excludedRefs.filter((ref) =>
+      s.project.sources.some(
+        (source) =>
+          roles.includes(source.role) && ref.startsWith(source.id + ":"),
+      ),
+    ),
+    ...(key === "feedbackRate"
+      ? {
+          invitations: s.project.policy.invitations,
+          invitedIds:
+            s.project.policy.invitations === "custom"
+              ? [
+                  ...new Set(s.project.policy.invitedIds.map(normalizeId)),
+                ].sort()
+              : [],
+        }
+      : {}),
+    ...(key === "satisfaction"
+      ? {
+          ratingMin: s.project.policy.ratingMin,
+          ratingMax: s.project.policy.ratingMax,
+        }
+      : {}),
+  });
+  if (JSON.stringify(policy(before)) !== JSON.stringify(policy(after)))
+    reasons.push("该指标的统计口径或排除记录变化");
+  const metric = (s: Snapshot) => {
+    const m = s.result.metrics[key];
+    return {
+      value: m.value,
+      numerator: m.numerator,
+      denominator: m.denominator,
+      evidence: m.evidence,
+      denominatorEvidence: m.denominatorEvidence,
+    };
+  };
+  if (JSON.stringify(metric(before)) !== JSON.stringify(metric(after)))
+    reasons.push("计算结果或证据引用变化");
+  if (before.engineVersion !== after.engineVersion)
+    reasons.push("计算引擎版本变化");
+  return reasons;
 }
 export const formatValue = (n: number | null) =>
   n === null ? "—" : Number.isInteger(n) ? String(n) : n.toFixed(1);
