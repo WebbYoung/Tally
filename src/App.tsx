@@ -179,8 +179,8 @@ export default function App() {
     available: false,
   });
   const [consent, setConsent] = useState(false);
-  const [mappingConsent,setMappingConsent]=useState(false);
-  const [diffLimit,setDiffLimit]=useState(12);
+  const [mappingConsent, setMappingConsent] = useState(false);
+  const [diffLimit, setDiffLimit] = useState(12);
   const [issueFilter, setIssueFilter] = useState("all");
   const [issueLimit, setIssueLimit] = useState(15);
   const [compareId, setCompareId] = useState("");
@@ -189,7 +189,9 @@ export default function App() {
   const [pendingIndex, setPendingIndex] = useState(0);
   const [replaceRole, setReplaceRole] = useState(true);
   const [storageError, setStorageError] = useState("");
-  useEffect(()=>{if(page==='import')setActiveId(null);},[page]);
+  useEffect(() => {
+    if (page === "import") setActiveId(null);
+  }, [page]);
 
   useEffect(() => {
     loadState()
@@ -1420,7 +1422,11 @@ export default function App() {
                     <section className="panel plan-panel">
                       <div className="panel-head">
                         <div>
-                          <Badge tone="neutral">{analysis?'已执行 · 可修改参数':'待确认 · 不自动执行'}</Badge>
+                          <Badge tone="neutral">
+                            {analysis
+                              ? "已执行 · 可修改参数"
+                              : "待确认 · 不自动执行"}
+                          </Badge>
                           <h2>{plan.title}</h2>
                         </div>
                         <Settings2 size={22} />
@@ -1694,6 +1700,16 @@ export default function App() {
                                       ) : (
                                         <Badge tone="amber">已变化</Badge>
                                       )}
+                                      {old &&
+                                        old.value !== m.value &&
+                                        formatValue(old.value) ===
+                                          formatValue(m.value) && (
+                                          <small className="precise-change">
+                                            显示值经四舍五入；原值{" "}
+                                            {String(old.value)} →{" "}
+                                            {String(m.value)}
+                                          </small>
+                                        )}
                                     </td>
                                   </tr>
                                 );
@@ -1716,11 +1732,50 @@ export default function App() {
                               .slice(0, diffLimit)
                               .map((d) => (
                                 <details className="row-diff" key={d.key}>
-                                  <summary>{d.kind} · {d.key} · {d.before} → {d.after} 条</summary>
-                                  <div className="diff-columns">{[{label:comparison.label,rows:d.beforeRows},{label:latest.label,rows:d.afterRows}].map(side=><div key={side.label}><strong>{side.label}</strong>{side.rows.length?side.rows.map((row,i)=><p key={i}>{row.file} / {row.sheet} 第 {row.row} 行<br/>{Object.entries(row.values).map(([k,v])=>`${k}：${v}`).join('；')}</p>):<p>无对应记录</p>}</div>)}</div>
+                                  <summary>
+                                    {d.kind} · {d.key} · {d.before} → {d.after}{" "}
+                                    条
+                                  </summary>
+                                  <div className="diff-columns">
+                                    {[
+                                      {
+                                        label: comparison.label,
+                                        rows: d.beforeRows,
+                                      },
+                                      {
+                                        label: latest.label,
+                                        rows: d.afterRows,
+                                      },
+                                    ].map((side) => (
+                                      <div key={side.label}>
+                                        <strong>{side.label}</strong>
+                                        {side.rows.length ? (
+                                          side.rows.map((row, i) => (
+                                            <p key={i}>
+                                              {row.file} / {row.sheet} 第{" "}
+                                              {row.row} 行<br />
+                                              {Object.entries(row.values)
+                                                .map(([k, v]) => `${k}：${v}`)
+                                                .join("；")}
+                                            </p>
+                                          ))
+                                        ) : (
+                                          <p>无对应记录</p>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
                                 </details>
                               ))}
-                            {compareRows(comparison.project,latest.project).length>diffLimit&&<button className="button secondary" onClick={()=>setDiffLimit(n=>n+30)}>显示更多行变化</button>}
+                            {compareRows(comparison.project, latest.project)
+                              .length > diffLimit && (
+                              <button
+                                className="button secondary"
+                                onClick={() => setDiffLimit((n) => n + 30)}
+                              >
+                                显示更多行变化
+                              </button>
+                            )}
                             <p className="subtle">
                               重复标识或匿名记录不进行确定性行匹配；旧结果不重算，由快照还原。
                             </p>

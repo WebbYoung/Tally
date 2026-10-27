@@ -492,14 +492,30 @@ export const formatValue = (n: number | null) =>
 export function compareRows(before: Project, after: Project) {
   // Only unique stable identifiers are matched. Repeated/anonymous rows remain ambiguous.
   const entries = (p: Project) => {
-    const map = new Map<string, { file: string; sheet: string; row: number; values: Record<string,string> }[]>();
+    const map = new Map<
+      string,
+      {
+        file: string;
+        sheet: string;
+        row: number;
+        values: Record<string, string>;
+      }[]
+    >();
     p.sources.forEach((s) =>
       s.rows.forEach((row) => {
         const id = normalizeId(row.values[s.mapping.id ?? ""] ?? "");
         const key = id
           ? `${s.role}:${id}`
           : `anonymous:${s.id}:${row.rowNumber}`;
-        map.set(key, [...(map.get(key) ?? []), {file:s.name,sheet:s.sheet,row:row.rowNumber,values:row.values}]);
+        map.set(key, [
+          ...(map.get(key) ?? []),
+          {
+            file: s.name,
+            sheet: s.sheet,
+            row: row.rowNumber,
+            values: row.values,
+          },
+        ]);
       }),
     );
     return map;
@@ -509,7 +525,11 @@ export function compareRows(before: Project, after: Project) {
   return [...new Set([...a.keys(), ...b.keys()])].flatMap((key) => {
     const x = a.get(key),
       y = b.get(key);
-    if (JSON.stringify(x?.map(r=>r.values)) === JSON.stringify(y?.map(r=>r.values))) return [];
+    if (
+      JSON.stringify(x?.map((r) => r.values)) ===
+      JSON.stringify(y?.map((r) => r.values))
+    )
+      return [];
     return [
       {
         key,
@@ -522,8 +542,8 @@ export function compareRows(before: Project, after: Project) {
               : "修改",
         before: x?.length ?? 0,
         after: y?.length ?? 0,
-        beforeRows: x??[],
-        afterRows: y??[],
+        beforeRows: x ?? [],
+        afterRows: y ?? [],
       },
     ];
   });

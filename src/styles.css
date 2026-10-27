@@ -1623,7 +1623,8 @@ td {
     gap: 10px;
   }
   .activity-strip > .badge {
-    display: none;
+    display: inline-flex;
+    margin-left: 0;
   }
   .report-paper {
     padding: 35px 25px;
@@ -1806,4 +1807,40 @@ td {
   }
 }
 
-.row-diff{border:1px solid #e4e9df;border-radius:8px;margin:12px 0;padding:12px;font-size:12px;overflow-wrap:anywhere}.row-diff summary{cursor:pointer;color:#587256}.diff-columns{display:grid;grid-template-columns:1fr 1fr;gap:15px;margin-top:12px}.diff-columns p{font-size:11px;line-height:1.8;padding:8px 0}@media(max-width:600px){.diff-columns{grid-template-columns:1fr}}
+.row-diff {
+  border: 1px solid #e4e9df;
+  border-radius: 8px;
+  margin: 12px 0;
+  padding: 12px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.row-diff summary {
+  cursor: pointer;
+  color: #587256;
+}
+.diff-columns {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 15px;
+  margin-top: 12px;
+}
+.diff-columns p {
+  font-size: 11px;
+  line-height: 1.8;
+  padding: 8px 0;
+}
+@media (max-width: 600px) {
+  .diff-columns {
+    grid-template-columns: 1fr;
+  }
+}
+.precise-change {
+  display: block;
+  max-width: 180px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.7;
+  color: #8a714e;
+  margin-top: 6px;
+}
