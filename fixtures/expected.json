@@ -1,0 +1,33 @@
+{
+  "synthetic": true,
+  "policy": {
+    "duplicate": "first",
+    "invitations": "registeredAttendees",
+    "ratingMin": 1,
+    "ratingMax": 5
+  },
+  "original": {
+    "registered": 300,
+    "attendanceRecords": 240,
+    "attended": 210,
+    "registeredAttended": 180,
+    "attendanceRate": 60,
+    "duplicates": 30,
+    "walkIns": 30,
+    "feedbackRate": 50,
+    "satisfaction": 4.2
+  },
+  "clean": {
+    "duplicates": 0,
+    "attended": 210,
+    "attendanceRate": 60
+  },
+  "corrected": {
+    "attended": 209,
+    "registeredAttended": 179,
+    "duplicates": 29,
+    "attendanceRate": 59.66666666666667,
+    "feedbackRate": 49.72067039106145,
+    "satisfaction": 4.191011235955056
+  }
+}

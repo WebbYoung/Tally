@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.env
+.env.*
+!.env.example
+*.tsbuildinfo
+coverage/
+test-results/
+.local/
+*.log
+node_modules.incomplete-backup/
