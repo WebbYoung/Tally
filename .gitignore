@@ -8,3 +8,4 @@ coverage/
 test-results/
 .local/
 *.log
+node_modules.incomplete-backup/
