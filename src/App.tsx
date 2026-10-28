@@ -58,6 +58,7 @@ import {
   identityFingerprint,
   mappingError,
   metricDependencyChanges,
+  planSchema,
   reconcile,
 } from "./domain/engine";
 import { demoProject } from "./domain/demo";
@@ -196,6 +197,15 @@ export default function App() {
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
   const [persistStatus, setPersistStatus] = useState("已保存");
   const persisted = useRef<SavedState | null>(null);
+  const aiRequest = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (aiRequest.current) {
+      aiRequest.current.abort();
+      aiRequest.current = null;
+      setBusy("");
+    }
+  }, [project, activeId, page, question]);
+  useEffect(() => () => aiRequest.current?.abort(), []);
   useEffect(() => {
     if (page === "import") setActiveId(null);
   }, [page]);
@@ -428,13 +438,18 @@ export default function App() {
       return;
     }
     setBusy("AI 正在建议字段映射");
+    aiRequest.current?.abort();
+    const request = new AbortController();
+    aiRequest.current = request;
     try {
       const r = await fetch("/api/mapping", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ headers: source.headers }),
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
       });
       const data = await r.json();
+      if (request.signal.aborted) return;
       if (!r.ok) throw new Error(data.error);
       edit((p) => ({
         ...p,
@@ -446,9 +461,12 @@ export default function App() {
       }));
       setMessage("AI 建议已填入，请人工核对后确认。");
     } catch (e) {
-      fail(e);
+      if (!request.signal.aborted) fail(e);
     } finally {
-      setBusy("");
+      if (aiRequest.current === request) {
+        aiRequest.current = null;
+        setBusy("");
+      }
     }
   }
   async function ask() {
@@ -469,24 +487,44 @@ export default function App() {
     setError("");
     setPlan(null);
     setAnalysis(null);
+    aiRequest.current?.abort();
+    const request = new AbortController();
+    aiRequest.current = request;
     try {
       const fields = [
         ...new Set(
-          (display?.sources ?? []).flatMap((s) => Object.keys(s.mapping)),
+          (display?.sources ?? [])
+            .filter((s) => s.confirmed)
+            .flatMap((s) =>
+              Object.entries(s.mapping)
+                .filter(
+                  ([field, header]) =>
+                    header &&
+                    s.headers.includes(header) &&
+                    ((field !== "channel" && field !== "grade") ||
+                      s.role === "registration"),
+                )
+                .map(([field]) => field),
+            ),
         ),
       ];
       const r = await fetch("/api/plan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, fields }),
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
       });
       const data = await r.json();
+      if (request.signal.aborted) return;
       if (!r.ok) throw new Error(data.error);
-      setPlan(data.plan);
+      setPlan(planSchema.parse(data.plan));
     } catch (e) {
-      fail(e);
+      if (!request.signal.aborted) fail(e);
     } finally {
-      setBusy("");
+      if (aiRequest.current === request) {
+        aiRequest.current = null;
+        setBusy("");
+      }
     }
   }
   function runAnalysis() {

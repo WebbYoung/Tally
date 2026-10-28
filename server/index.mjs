@@ -52,8 +52,35 @@ async function callModel(messages, tool) {
   );
   if (!response.ok)
     throw new Error("模型服务不可用，请检查服务端配置或稍后重试。");
-  const data = await response.json();
-  const args = data.choices?.[0]?.message?.tool_calls?.[0]?.function?.arguments;
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("模型服务返回空响应。");
+  let raw = "",
+    size = 0;
+  const decoder = new TextDecoder();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 65536) {
+        await reader.cancel();
+        throw new Error("模型响应过大，请缩短问题或使用预设分析。");
+      }
+      raw += decoder.decode(value, { stream: true });
+    }
+    raw += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  const data = JSON.parse(raw);
+  const calls = data.choices?.[0]?.message?.tool_calls;
+  if (
+    !Array.isArray(calls) ||
+    calls.length !== 1 ||
+    calls[0]?.function?.name !== tool.name
+  )
+    throw new Error("模型未调用指定的统计工具，请使用预设分析。");
+  const args = calls[0].function.arguments;
   if (typeof args !== "string")
     throw new Error("模型未返回工具参数，请使用预设分析。");
   return JSON.parse(args);
@@ -152,6 +179,8 @@ const server = http.createServer(async (req, res) => {
         .parse(mapping);
       if (Object.values(parsed).some((v) => !headers.includes(v)))
         throw new Error("映射引用了不存在的表头。");
+      if (new Set(Object.values(parsed)).size !== Object.values(parsed).length)
+        throw new Error("同一表头不能同时映射为多个字段，请手动确认映射。");
       send(200, { mapping: parsed });
       return;
     }

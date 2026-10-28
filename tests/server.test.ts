@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { createServer, type Server } from "node:http";
+import { createServer, get, type Server } from "node:http";
 import { spawn, type ChildProcess } from "node:child_process";
 import { once } from "node:events";
 import type { AddressInfo } from "node:net";
@@ -8,7 +8,8 @@ let mock: Server,
   api: ChildProcess,
   base = "",
   output: unknown,
-  seen: any;
+  seen: any,
+  toolName: string | undefined;
 const plan = {
   metric: "attendanceRate",
   groupBy: "channel",
@@ -41,6 +42,7 @@ beforeAll(async () => {
               tool_calls: [
                 {
                   function: {
+                    name: toolName ?? seen.tools[0].function.name,
                     arguments:
                       typeof output === "string"
                         ? output
@@ -93,6 +95,40 @@ afterAll(async () => {
   if (mock) await new Promise<void>((resolve) => mock.close(() => resolve()));
 });
 describe("AI 网关（模拟模型，无外部调用）", () => {
+  it("拒绝错误工具、过大响应和复用同一列的映射", async () => {
+    output = { action: "plan", reason: "", plan };
+    toolName = "run_sql";
+    expect(
+      (await post("/api/plan", { question: "渠道到场率", fields: ["channel"] }))
+        .status,
+    ).toBe(502);
+    toolName = undefined;
+    output = "x".repeat(70000);
+    expect(
+      (await post("/api/plan", { question: "渠道到场率", fields: ["channel"] }))
+        .body.error,
+    ).toContain("过大");
+    output = { id: "学号", rating: "学号" };
+    expect(
+      (await post("/api/mapping", { headers: ["学号"] })).body.error,
+    ).toContain("多个字段");
+  });
+  it("接受同源端口并拒绝伪造 Host", async () => {
+    expect(
+      (await fetch(base + "/api/status", { headers: { Origin: base } })).status,
+    ).toBe(200);
+    const status = await new Promise((resolve, reject) => {
+      get(
+        base + "/api/status",
+        { headers: { Host: "untrusted.example" } },
+        (res) => {
+          res.resume();
+          resolve(res.statusCode);
+        },
+      ).on("error", reject);
+    });
+    expect(status).toBe(403);
+  });
   it("仅暴露模型状态，不暴露凭据", async () => {
     const r = await fetch(base + "/api/status");
     const data = await r.json();
