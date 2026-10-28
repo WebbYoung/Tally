@@ -94,6 +94,13 @@ export async function readSpreadsheet(
     if (headerIndex < 0) throw new Error(`工作表 ${sheet} 为空。`);
     const headers = data[headerIndex].map((h) => h.trim());
     if (
+      headers.some((h) => h.length > 500) ||
+      data.some((row) => row.some((cell) => cell.length > 10000))
+    )
+      throw new Error(
+        "表头最多 500 字符，单元格最多 10,000 字符；请拆分过长文本后上传。",
+      );
+    if (
       headers.length > 100 ||
       headers.some((h) => !h) ||
       new Set(headers).size !== headers.length

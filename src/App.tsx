@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, useRef, type ReactNode } from "react";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -65,6 +65,8 @@ import { downloadSources, readSpreadsheet } from "./domain/files";
 import { loadState, saveState } from "./domain/storage";
 import { exportEvidence, exportReport } from "./domain/report";
 import type { AnalysisRecord } from "./domain/types";
+import type { SavedState } from "./domain/storage";
+import { WorkspaceDialog } from "./components/WorkspaceDialog";
 
 type Page =
   "overview" | "import" | "review" | "analysis" | "versions" | "report";
@@ -191,6 +193,9 @@ export default function App() {
   const [pendingIndex, setPendingIndex] = useState(0);
   const [replaceRole, setReplaceRole] = useState(true);
   const [storageError, setStorageError] = useState("");
+  const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [persistStatus, setPersistStatus] = useState("已保存");
+  const persisted = useRef<SavedState | null>(null);
   useEffect(() => {
     if (page === "import") setActiveId(null);
   }, [page]);
@@ -199,14 +204,17 @@ export default function App() {
     loadState()
       .then((s) => {
         if (s) {
+          persisted.current = s;
           setProject(s.project);
           setSnapshots(s.snapshots);
           setActiveId(s.activeId);
           setAnalyses(s.analyses ?? []);
         }
       })
-      .catch(() =>
-        setStorageError("本地存储不可用。请勿关闭页面，并及时导出报告。"),
+      .catch((e) =>
+        setStorageError(
+          e instanceof Error ? e.message : "本地存储不可用。请导出完整备份。",
+        ),
       )
       .finally(() => setLoaded(true));
     fetch("/api/status")
@@ -215,19 +223,46 @@ export default function App() {
       .catch(() => setAi({ available: false }));
   }, []);
   useEffect(() => {
-    if (loaded && project) {
-      const timer = setTimeout(
-        () =>
-          saveState({ project, snapshots, activeId, analyses }).catch(() =>
+    if (loaded && project && !storageError) {
+      if (
+        persisted.current?.project === project &&
+        persisted.current?.snapshots === snapshots &&
+        persisted.current?.activeId === activeId &&
+        persisted.current?.analyses === analyses
+      )
+        return;
+      setPersistStatus("待保存");
+      const state = { project, snapshots, activeId, analyses };
+      let cancelled = false;
+      const timer = setTimeout(() => {
+        setPersistStatus("保存中");
+        saveState(state)
+          .then(() => {
+            persisted.current = state;
+            if (!cancelled) setPersistStatus("已保存");
+          })
+          .catch((e) =>
             setStorageError(
-              "保存失败，可能已达到浏览器存储配额。请导出后再继续。",
+              e instanceof Error ? e.message : "保存失败，请导出完整备份。",
             ),
-          ),
-        400,
-      );
-      return () => clearTimeout(timer);
+          );
+      }, 400);
+      return () => {
+        cancelled = true;
+        clearTimeout(timer);
+      };
     }
-  }, [project, snapshots, activeId, analyses, loaded]);
+  }, [project, snapshots, activeId, analyses, loaded, storageError]);
+  useEffect(() => {
+    const guard = (e: BeforeUnloadEvent) => {
+      if (persistStatus !== "已保存" || storageError) {
+        e.preventDefault();
+        e.returnValue = "";
+      }
+    };
+    window.addEventListener("beforeunload", guard);
+    return () => window.removeEventListener("beforeunload", guard);
+  }, [persistStatus, storageError]);
   useEffect(() => {
     if (message) {
       const t = setTimeout(() => setMessage(""), 4500);
@@ -300,6 +335,12 @@ export default function App() {
     }
   }
   async function saveVersion() {
+    if (snapshots.length >= 100) {
+      setError(
+        "当前活动已达到 100 个确认版本，请先导出完整备份，再创建新活动。",
+      );
+      return;
+    }
     if (!project || !draftResult?.ready) {
       setError("请先导入必需表格、确认映射并处理待核对记录。");
       return;
@@ -323,7 +364,7 @@ export default function App() {
       };
       setSnapshots((old) => [...old, s]);
       setActiveId(s.id);
-      setMessage(`${s.label} 已保存，旧版本保持不变。`);
+      setMessage(`${s.label} 已创建，正在保存到本地；旧版本保持不变。`);
     } catch (e) {
       fail(e);
     } finally {
@@ -356,6 +397,13 @@ export default function App() {
   function acceptSource() {
     const s = pendingSources[pendingIndex];
     if (!s) return;
+    if (
+      (project?.sources.filter((old) => !replaceRole || old.role !== s.role)
+        .length ?? 0) >= 30
+    ) {
+      setError("每个活动最多保留 30 个数据源，请使用替换同类表格功能。");
+      return;
+    }
     if (
       project?.sources.some(
         (old) => old.hash === s.hash && old.sheet === s.sheet,
@@ -447,6 +495,15 @@ export default function App() {
       const rows = executePlan(plan, result, display);
       setAnalysis(rows);
       if (active) {
+        if (
+          analyses.length >= 500 &&
+          !analyses.some(
+            (a) =>
+              a.snapshotId === active.id &&
+              JSON.stringify(a.plan) === JSON.stringify(plan),
+          )
+        )
+          throw new Error("已达到 500 项分析，请导出备份后再继续。");
         const record: AnalysisRecord = {
           id: crypto.randomUUID(),
           snapshotId: active.id,
@@ -573,7 +630,7 @@ export default function App() {
           <div className="top-actions">
             <span className="local-status">
               <span className="online-dot" />
-              {storageError ? "保存异常" : "本地数据存储"}
+              {storageError ? "保存异常" : "本地" + persistStatus}
             </span>
             <button
               className="icon-button"
@@ -583,6 +640,13 @@ export default function App() {
               <Settings2 size={19} />
             </button>
             <span className="avatar round">我</span>
+            <button
+              className="icon-button"
+              aria-label="工作空间与备份"
+              onClick={() => setWorkspaceOpen(true)}
+            >
+              <Database size={19} />
+            </button>
           </div>
         </header>
         <main>
@@ -2035,6 +2099,28 @@ export default function App() {
           {message}
         </div>
       )}
+      {workspaceOpen && (
+        <WorkspaceDialog
+          state={project ? { project, snapshots, activeId, analyses } : null}
+          onClose={() => setWorkspaceOpen(false)}
+          onRestore={async (restored) => {
+            await saveState(restored);
+            persisted.current = restored;
+            setProject(restored.project);
+            setSnapshots(restored.snapshots);
+            setAnalyses(restored.analyses ?? []);
+            setActiveId(restored.activeId);
+            setStorageError("");
+            setPersistStatus("已保存");
+            setPlan(null);
+            setAnalysis(null);
+            setEvidence(null);
+            setPendingSources([]);
+            setPage("overview");
+            setMessage("完整工作空间已恢复并保存。");
+          }}
+        />
+      )}
       {newOpen && (
         <div className="modal-backdrop">
           <section
@@ -2051,9 +2137,20 @@ export default function App() {
               <X />
             </button>
             <div className="eyebrow">NEW ACTIVITY</div>
+            {project && (
+              <button
+                className="button secondary"
+                onClick={() => {
+                  setNewOpen(false);
+                  setWorkspaceOpen(true);
+                }}
+              >
+                先备份当前活动
+              </button>
+            )}
             <h2>创建一次新的复盘</h2>
             <p>
-              第一版每个工作空间保存一场活动。创建新活动会替换当前工作空间，请先导出需要保留的报告。
+              每个工作空间保存一场活动。创建新活动会替换当前工作空间，请先下载完整备份以便恢复历史版本。
             </p>
             <label>
               活动名称
