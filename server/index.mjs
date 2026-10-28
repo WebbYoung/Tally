@@ -1,5 +1,6 @@
 import http from "node:http";
 import { z } from "zod";
+import { serveStatic } from "./static.mjs";
 
 const planSchema = z
   .object({
@@ -67,13 +68,24 @@ const server = http.createServer(async (req, res) => {
     res.end(JSON.stringify(data));
   };
   const origin = req.headers.origin;
+  const port = server.address()?.port;
+  const localOrigins = new Set(
+    [5173, 4173, port].flatMap((p) => [
+      `http://127.0.0.1:${p}`,
+      `http://localhost:${p}`,
+    ]),
+  );
   if (
-    origin &&
-    !/^http:\/\/(127\.0\.0\.1|localhost):(5173|4173)$/.test(origin)
+    !new Set([`127.0.0.1:${port}`, `localhost:${port}`]).has(req.headers.host)
   ) {
+    send(403, { error: "仅接受本机地址。" });
+    return;
+  }
+  if (origin && !localOrigins.has(origin)) {
     send(403, { error: "不接受跨站请求。" });
     return;
   }
+  if (process.argv.includes("--serve") && (await serveStatic(req, res))) return;
   if (req.method === "GET" && req.url === "/api/status") {
     send(200, {
       available: available(),
@@ -255,5 +267,18 @@ const server = http.createServer(async (req, res) => {
   }
 });
 server.listen(Number(process.env.PORT || 8787), "127.0.0.1", () =>
-  console.log("Tally API http://127.0.0.1:" + server.address().port),
+  console.log(
+    "Tally " +
+      (process.argv.includes("--serve") ? "App" : "API") +
+      " http://127.0.0.1:" +
+      server.address().port,
+  ),
 );
+server.on("error", (error) => {
+  console.error(
+    error.code === "EADDRINUSE"
+      ? "端口已被占用，请关闭旧服务或修改 .env 中的 PORT。"
+      : "本地服务启动失败：" + error.message,
+  );
+  process.exitCode = 1;
+});
