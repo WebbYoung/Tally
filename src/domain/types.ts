@@ -49,6 +49,7 @@ export interface Ref {
 }
 export interface Person {
   id: string;
+  anonymous?: boolean;
   channel: string;
   grade: string;
   time: string;
@@ -156,4 +157,4 @@ export const DEFAULT_POLICY: Policy = {
   ratingMax: 5,
   excludedRefs: [],
 };
-export const ENGINE_VERSION = "0.1.0";
+export const ENGINE_VERSION = "0.2.0";

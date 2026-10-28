@@ -67,6 +67,7 @@ export function reconcile(project: Project): Result {
       const get = (field: keyof Source["mapping"]) =>
         row.values[source.mapping[field] ?? ""]?.trim() ?? "";
       let id = normalizeId(get("id"));
+      const anonymous = !id;
       if (!id && source.role !== "feedback") {
         issues.push({
           kind: "missingId",
@@ -95,6 +96,7 @@ export function reconcile(project: Project): Result {
         });
       byRole[source.role].push({
         id,
+        anonymous,
         channel: get("channel") || "未填写",
         grade: get("grade") || "未填写",
         time: get("time"),
@@ -106,9 +108,12 @@ export function reconcile(project: Project): Result {
   function unique(role: Source["role"]): Person[] {
     const grouped = new Map<string, Person[]>();
     byRole[role].forEach((p) => {
-      const rows = grouped.get(p.id);
+      const key = JSON.stringify(
+        p.anonymous ? ["anonymous", p.ref.key] : ["person", p.id],
+      );
+      const rows = grouped.get(key);
       if (rows) rows.push(p);
-      else grouped.set(p.id, [p]);
+      else grouped.set(key, [p]);
     });
     return [...grouped.values()].map((rows) => {
       if (rows.length > 1) {
@@ -149,7 +154,7 @@ export function reconcile(project: Project): Result {
     }),
   );
   feedback
-    .filter((p) => !attIds.has(p.id) && !p.id.startsWith("anonymous:"))
+    .filter((p) => !attIds.has(p.id) && !p.anonymous)
     .forEach((p) =>
       issues.push({
         kind: "unmatchedFeedback",
@@ -157,7 +162,9 @@ export function reconcile(project: Project): Result {
         refs: [p.ref],
       }),
     );
-  const eligibleFeedback = feedback.filter((p) => attIds.has(p.id));
+  const eligibleFeedback = feedback.filter(
+    (p) => !p.anonymous && attIds.has(p.id),
+  );
   const inviteIds = new Set(
     project.policy.invitedIds.map(normalizeId).filter(Boolean),
   );
@@ -377,7 +384,7 @@ export function executePlan(
     );
   if (
     ["feedbackRate", "satisfaction"].includes(plan.metric) &&
-    result.feedback.some((p) => p.id.startsWith("anonymous:"))
+    result.feedback.some((p) => p.anonymous ?? p.id.startsWith("anonymous:"))
   )
     throw new Error(
       "反馈中存在匿名记录，无法可靠关联人员；请使用总体评分分析。",

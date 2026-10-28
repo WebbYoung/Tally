@@ -59,6 +59,7 @@ const ref = z.object({
   refs = z.array(ref).max(600000);
 const person = z.object({
   id: text,
+  anonymous: z.boolean().optional(),
   channel: text,
   grade: text,
   time: text,
