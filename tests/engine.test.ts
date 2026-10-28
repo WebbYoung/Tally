@@ -254,7 +254,7 @@ describe("版本与真实故障检测", () => {
     expect(html).not.toContain("<script>alert");
     expect(html).toContain("&lt;script&gt;");
     expect(html).toContain("SHA-256");
-    expect(html).toContain("第 2 行");
+    expect(html).toContain("第 2–301 行（300 条）");
     expect(html).not.toContain("S0001");
   });
 });

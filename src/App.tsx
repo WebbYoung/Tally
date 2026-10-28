@@ -169,7 +169,10 @@ export default function App() {
   const [error, setError] = useState("");
   const [newOpen, setNewOpen] = useState(false);
   const [newName, setNewName] = useState("");
-  const [newDate, setNewDate] = useState(new Date().toISOString().slice(0, 10));
+  const [newDate, setNewDate] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  });
   const [showPolicy, setShowPolicy] = useState(false);
   const [evidence, setEvidence] = useState<{
     title: string;
@@ -195,6 +198,7 @@ export default function App() {
   const [replaceRole, setReplaceRole] = useState(true);
   const [storageError, setStorageError] = useState("");
   const [workspaceOpen, setWorkspaceOpen] = useState(false);
+  const [restoring, setRestoring] = useState(false);
   const [persistStatus, setPersistStatus] = useState("已保存");
   const persisted = useRef<SavedState | null>(null);
   const aiRequest = useRef<AbortController | null>(null);
@@ -211,8 +215,10 @@ export default function App() {
   }, [page]);
 
   useEffect(() => {
+    let disposed = false;
     loadState()
       .then((s) => {
+        if (disposed) return;
         if (s) {
           persisted.current = s;
           setProject(s.project);
@@ -221,19 +227,30 @@ export default function App() {
           setAnalyses(s.analyses ?? []);
         }
       })
-      .catch((e) =>
-        setStorageError(
-          e instanceof Error ? e.message : "本地存储不可用。请导出完整备份。",
-        ),
+      .catch(
+        (e) =>
+          !disposed &&
+          setStorageError(
+            e instanceof Error ? e.message : "本地存储不可用。请导出完整备份。",
+          ),
       )
-      .finally(() => setLoaded(true));
+      .finally(() => {
+        if (!disposed) setLoaded(true);
+      });
     fetch("/api/status")
       .then((r) => r.json())
-      .then(setAi)
-      .catch(() => setAi({ available: false }));
+      .then((value) => {
+        if (!disposed) setAi(value);
+      })
+      .catch(() => {
+        if (!disposed) setAi({ available: false });
+      });
+    return () => {
+      disposed = true;
+    };
   }, []);
   useEffect(() => {
-    if (loaded && project && !storageError) {
+    if (loaded && project && !storageError && !restoring) {
       if (
         persisted.current?.project === project &&
         persisted.current?.snapshots === snapshots &&
@@ -262,7 +279,7 @@ export default function App() {
         clearTimeout(timer);
       };
     }
-  }, [project, snapshots, activeId, analyses, loaded, storageError]);
+  }, [project, snapshots, activeId, analyses, loaded, storageError, restoring]);
   useEffect(() => {
     const guard = (e: BeforeUnloadEvent) => {
       if (persistStatus !== "已保存" || storageError) {
@@ -2142,20 +2159,25 @@ export default function App() {
           state={project ? { project, snapshots, activeId, analyses } : null}
           onClose={() => setWorkspaceOpen(false)}
           onRestore={async (restored) => {
-            await saveState(restored);
-            persisted.current = restored;
-            setProject(restored.project);
-            setSnapshots(restored.snapshots);
-            setAnalyses(restored.analyses ?? []);
-            setActiveId(restored.activeId);
-            setStorageError("");
-            setPersistStatus("已保存");
-            setPlan(null);
-            setAnalysis(null);
-            setEvidence(null);
-            setPendingSources([]);
-            setPage("overview");
-            setMessage("完整工作空间已恢复并保存。");
+            setRestoring(true);
+            try {
+              await saveState(restored);
+              persisted.current = restored;
+              setProject(restored.project);
+              setSnapshots(restored.snapshots);
+              setAnalyses(restored.analyses ?? []);
+              setActiveId(restored.activeId);
+              setStorageError("");
+              setPersistStatus("已保存");
+              setPlan(null);
+              setAnalysis(null);
+              setEvidence(null);
+              setPendingSources([]);
+              setPage("overview");
+              setMessage("完整工作空间已恢复并保存。");
+            } finally {
+              setRestoring(false);
+            }
           }}
         />
       )}

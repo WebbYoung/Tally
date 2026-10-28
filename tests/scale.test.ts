@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { demoProject } from "../src/domain/demo";
-import { executePlan, reconcile } from "../src/domain/engine";
+import { compareRows, executePlan, reconcile } from "../src/domain/engine";
 describe("20,000 行确定性规模检查", () => {
   it("两万报名、两万签到、万份反馈仍保持指标与分组正确", async () => {
     const p = await demoProject();
@@ -48,5 +48,9 @@ describe("20,000 行确定性规模检查", () => {
     const result = reconcile(p);
     expect(result.metrics.attended.value).toBe(1);
     expect(result.metrics.duplicates.value).toBe(19999);
+    const changed = structuredClone(p);
+    changed.sources[1].rows[19999].values["签到时间"] = "15:00";
+    const difference = compareRows(p, changed);
+    expect(difference).toHaveLength(1);
   });
 });

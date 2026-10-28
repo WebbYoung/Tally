@@ -613,15 +613,15 @@ export function compareRows(before: Project, after: Project) {
         const key = id
           ? `${s.role}:${id}`
           : `anonymous:${s.id}:${row.rowNumber}`;
-        map.set(key, [
-          ...(map.get(key) ?? []),
-          {
-            file: s.name,
-            sheet: s.sheet,
-            row: row.rowNumber,
-            values: row.values,
-          },
-        ]);
+        const entry = {
+          file: s.name,
+          sheet: s.sheet,
+          row: row.rowNumber,
+          values: row.values,
+        };
+        const group = map.get(key);
+        if (group) group.push(entry);
+        else map.set(key, [entry]);
       }),
     );
     return map;
