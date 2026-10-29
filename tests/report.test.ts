@@ -21,6 +21,14 @@ it("行号范围可无损展开，不合并同名的不同来源", () => {
   const large = refsHtml(Array.from({ length: 20000 }, (_, i) => ref(i + 2)));
   expect(large).toContain("2–20001 行（20000 条）");
   expect(large.length).toBeLessThan(100);
+  const interleaved = refsHtml(
+    Array.from({ length: 2000 }, (_, i) => ref(2 + i * 10)),
+  );
+  expect(interleaved).toContain("2–19992（间隔 10） 行（2000 条）");
+  expect(interleaved.length).toBeLessThan(100);
+  expect(refsHtml([ref(2), ref(12), ref(23), ref(33)])).toContain(
+    "第 2、12、23、33 行（4 条）",
+  );
 });
 it("导出图表、口径和哈希，用户自由文本只作为转义文本", async () => {
   const project = await demoProject();
