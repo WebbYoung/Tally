@@ -46,6 +46,7 @@ async function callModel(messages, tool) {
         tools: [{ type: "function", function: tool }],
         tool_choice: { type: "function", function: { name: tool.name } },
         temperature: 0,
+        thinking: { type: "disabled" }
       }),
       signal: AbortSignal.timeout(25000),
     },
