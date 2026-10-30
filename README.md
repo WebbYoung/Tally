@@ -10,7 +10,9 @@
 
 纯静态托管（GitHub Pages），只部署前端构建产物：导入、核对、统计、口径版本、证据溯源、报告导出的完整链路都能用，**数据只留在浏览器本地**，不上传任何服务器。
 
-一处限制：云端 AI 网关需要 Node 服务端保管密钥，静态站点无法提供，因此该网址上显示“云端 AI 未配置”，自然语言提问按钮不可用，请改用**推荐分析 / 预设分析**（同一套确定性统计引擎）。要体验 AI 参数规划，按下方步骤本机运行 `npm start`。
+一处限制（已解决）：静态站点没有 Node 服务端，AI 采用**构建时注入密钥 + 浏览器直连**的方式——`VITE_AI_API_KEY` 在 CI 里从仓库 Secret `AI_API_KEY` 读入，烘进前端包，因此**该密钥对任何访问者可见**。这是公开演示站能开 AI 的唯一形态，代价明确：密钥等同于公开。仓库里不放密钥（走 Secret），泄露路径只有前端包本身；换密钥 = 更新 Secret 后重新发布。
+
+要在自己站点上关闭 AI，删掉 Secret `AI_API_KEY` 重新发布即可，页面自动退回「预设分析可用」。要在本机以「服务端保管密钥」的形态运行，按下方步骤 `npm start`。
 
 ## 快速运行
 
@@ -111,7 +113,17 @@ docs/            架构与演示验收
 
 `main` 为可发布分支（受保护，经 PR 合入）；`feat/*` 用于开发。不提交 `.env`、密钥或真实学生表格。
 
-推送 `main` 会触发 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml)：`npm ci` → `VITE_BASE=/Tally/ npm run build` → 上传 `dist/` 到 GitHub Pages。仓库名变化时需要同步改工作流里的 `VITE_BASE`（项目站点路径为 `/<repo>/`）。
+推送 `main` 会触发 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml)：`npm ci` → `VITE_BASE=/Tally/ VITE_STATIC=1 npm run build` → 上传 `dist/` 到 GitHub Pages。仓库名变化时需要同步改工作流里的 `VITE_BASE`（项目站点路径为 `/<repo>/`）。
+
+静态站的 AI 由仓库 Secret `AI_API_KEY` 注入（构建期变为 `VITE_AI_API_KEY`，浏览器直连模型接口，见上节限制说明）。部署相关环境变量：
+
+| 变量 | 作用 | 默认 |
+|---|---|---|
+| `VITE_BASE` | 站点子路径 | `/` |
+| `VITE_STATIC` | 静态模式：不探测本机网关 | 未设 |
+| `VITE_AI_API_KEY` | 有值即启用浏览器直连；为空退回预设分析 | 空 |
+| `VITE_AI_BASE_URL` | 兼容 OpenAI 的接口根路径 | `https://api.deepseek.com/v1` |
+| `VITE_AI_MODEL` | 模型名 | `deepseek-chat` |
 
 ## 可复现规模验收
 

@@ -61,6 +61,7 @@ import {
   planSchema,
   reconcile,
 } from "./domain/engine";
+import { aiMapping as requestMapping, aiPlan, aiStatus } from "./domain/gateway";
 import { demoProject } from "./domain/demo";
 import { downloadSources, readSpreadsheet } from "./domain/files";
 import { loadState, saveState } from "./domain/storage";
@@ -237,18 +238,14 @@ export default function App() {
       .finally(() => {
         if (!disposed) setLoaded(true);
       });
-    // 静态部署（GitHub Pages）没有网关进程，直接标记为不可用，避免一次注定 404 的探测请求。
-    if (import.meta.env.VITE_STATIC === "1") {
-      setAi({ available: false });
-    } else
-      fetch("/api/status")
-        .then((r) => r.json())
-        .then((value) => {
-          if (!disposed) setAi(value);
-        })
-        .catch(() => {
-          if (!disposed) setAi({ available: false });
-        });
+    // 静态部署（GitHub Pages）没有网关进程：构建时注入密钥就走浏览器直连，否则标记不可用。
+    aiStatus()
+      .then((value) => {
+        if (!disposed) setAi(value);
+      })
+      .catch(() => {
+        if (!disposed) setAi({ available: false });
+      });
     return () => {
       disposed = true;
     };
@@ -463,15 +460,11 @@ export default function App() {
     const request = new AbortController();
     aiRequest.current = request;
     try {
-      const r = await fetch("/api/mapping", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ headers: source.headers }),
-        signal: AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
-      });
-      const data = await r.json();
+      const data = await requestMapping(
+        source.headers,
+        AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
+      );
       if (request.signal.aborted) return;
-      if (!r.ok) throw new Error(data.error);
       edit((p) => ({
         ...p,
         sources: p.sources.map((s) =>
@@ -529,15 +522,12 @@ export default function App() {
             ),
         ),
       ];
-      const r = await fetch("/api/plan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, fields }),
-        signal: AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
-      });
-      const data = await r.json();
+      const data = await aiPlan(
+        question,
+        fields,
+        AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
+      );
       if (request.signal.aborted) return;
-      if (!r.ok) throw new Error(data.error);
       setPlan(planSchema.parse(data.plan));
     } catch (e) {
       if (!request.signal.aborted) fail(e);

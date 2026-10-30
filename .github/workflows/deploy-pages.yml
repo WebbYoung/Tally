@@ -32,6 +32,9 @@ jobs:
         env:
           VITE_BASE: /Tally/
           VITE_STATIC: "1"
+          # 静态站没有服务端：密钥在构建时注入前端包，浏览器直连模型接口。
+          # 仓库设置 → Secrets → AI_API_KEY；留空则站点退回「预设分析可用」。
+          VITE_AI_API_KEY: ${{ secrets.AI_API_KEY }}
         run: npm run build
 
       - name: Disable Jekyll processing
