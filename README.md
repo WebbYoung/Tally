@@ -4,6 +4,14 @@
 
 系统回答“发生了什么、数字是多少、哪些说法需要重新核对”，不从统计差异推断原因，也不自动给出管理建议。
 
+## 在线演示
+
+**https://webbyoung.github.io/Tally/**
+
+纯静态托管（GitHub Pages），只部署前端构建产物：导入、核对、统计、口径版本、证据溯源、报告导出的完整链路都能用，**数据只留在浏览器本地**，不上传任何服务器。
+
+一处限制：云端 AI 网关需要 Node 服务端保管密钥，静态站点无法提供，因此该网址上显示“云端 AI 未配置”，自然语言提问按钮不可用，请改用**推荐分析 / 预设分析**（同一套确定性统计引擎）。要体验 AI 参数规划，按下方步骤本机运行 `npm start`。
+
 ## 快速运行
 
 需要 Node.js **22.12+** 和 npm 或 pnpm。无需数据库，不配置 AI 也能使用本地核对、推荐分析、版本和报告。
@@ -11,7 +19,6 @@
 ```bash
 git clone https://github.com/WebbYoung/Tally.git
 cd Tally
-git switch feat/duibiao-workbench
 npm install
 npm run build
 npm start
@@ -102,7 +109,9 @@ fixtures/        虚构原始/清洗/修正 CSV 与期望指标
 docs/            架构与演示验收
 ```
 
-开发分支 `feat/duibiao-workbench`，通过 PR 审阅，**不直接推送 main**。不提交 `.env`、密钥或真实学生表格。
+`main` 为可发布分支（受保护，经 PR 合入）；`feat/*` 用于开发。不提交 `.env`、密钥或真实学生表格。
+
+推送 `main` 会触发 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml)：`npm ci` → `VITE_BASE=/Tally/ npm run build` → 上传 `dist/` 到 GitHub Pages。仓库名变化时需要同步改工作流里的 `VITE_BASE`（项目站点路径为 `/<repo>/`）。
 
 ## 可复现规模验收
 
