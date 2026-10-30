@@ -9,10 +9,14 @@ import { searchKb } from "../src/domain/kb";
 /** 按顺序吐出预设回复的模型替身；用尽后重复最后一条。 */
 function fakeModel(replies: unknown[]) {
   let index = 0;
-  const model: ModelClient & { calls: number } = {
+  const model: ModelClient & { calls: number; prompts: string[] } = {
     model: "fake",
     calls: 0,
-    async complete() {
+    prompts: [],
+    async complete({ messages }) {
+      model.prompts.push(
+        messages.map((m) => (typeof m.content === "string" ? m.content : "")).join("\n"),
+      );
       model.calls += 1;
       const reply = replies[Math.min(index, replies.length - 1)];
       index += 1;
@@ -235,5 +239,34 @@ describe("口径知识库检索", () => {
 
   it("无关问题不硬凑命中", () => {
     expect(searchKb("今天天气怎么样", { k: 3, minScore: 0.35 })).toEqual([]);
+  });
+});
+
+describe("数据事实注入（防「能算却说算不出」）", () => {
+  it("提示词里带上问卷发放范围与口径版本，而不是让模型猜", async () => {
+    const { project, result } = await setup();
+    const model = fakeModel([plan]);
+    await runAgent({ question: "各渠道到场率", project, result, model });
+    const prompt = model.prompts[0] ?? "";
+    expect(prompt).toContain("问卷发放范围：仅已报名到场者");
+    expect(prompt).toContain("口径 v");
+    expect(prompt).toContain("报名表「报名名单.csv」300 行");
+    expect(prompt).toContain("不得再判定为「未知」");
+  });
+
+  it("发放范围确为未知时如实标注未知，供模型给出 missing_data", async () => {
+    const { project, result } = await setup();
+    const unknown = {
+      ...project,
+      policy: { ...project.policy, invitations: "unknown" as const },
+    };
+    const model = fakeModel([plan]);
+    await runAgent({
+      question: "反馈回收率",
+      project: unknown,
+      result: reconcile(unknown),
+      model,
+    });
+    expect(model.prompts[0]).toContain("问卷发放范围：未知");
   });
 });

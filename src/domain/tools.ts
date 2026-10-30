@@ -1,6 +1,6 @@
 import { checkClaim, executePlan, formatValue, planSchema, reconcile } from "./engine";
 import { kbBrief, searchKb, toCitation, type KbHit } from "./kb";
-import type { Claim, MetricKey, Plan, Project, Ref, Result, Snapshot } from "./types";
+import type { Claim, MetricKey, Plan, Policy, Project, Ref, Result, Snapshot } from "./types";
 import { FIELD_LABELS, ROLE_LABELS } from "./types";
 
 /**
@@ -59,6 +59,14 @@ const PLAN_METRICS = [
 function result(ctx: ToolContext): Result {
   return ctx.result ?? reconcile(ctx.project);
 }
+
+/** 问卷实际发放范围的可读标签：模型必须能看到它，否则会把「已确认范围」误判成未知。 */
+export const INVITATION_LABELS: Record<Policy["invitations"], string> = {
+  unknown: "未知（尚未确认发放范围，回收率不可计算）",
+  allAttendees: "全部到场者",
+  registeredAttendees: "仅已报名到场者",
+  custom: "自定义到场名单",
+};
 
 function unavailable(ctx: ToolContext): string | null {
   const r = result(ctx);
@@ -127,10 +135,14 @@ const listFields: ToolDefinition = {
           mappedFields: Object.keys(s.mapping).filter((k) => s.mapping[k as never]),
         })),
         policy: {
+          version: ctx.project.policy.version,
           duplicate: ctx.project.policy.duplicate,
           invitations: ctx.project.policy.invitations,
+          invitationsLabel: INVITATION_LABELS[ctx.project.policy.invitations],
           ratingScale: [ctx.project.policy.ratingMin, ctx.project.policy.ratingMax],
+          excluded: ctx.project.policy.excludedRefs.length,
         },
+        anonymousFeedback: r.feedback.some((p) => !p.id),
         blockers: r.ready ? [] : r.warnings,
       },
     };
