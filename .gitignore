@@ -9,3 +9,6 @@ test-results/
 .local/
 *.log
 node_modules.incomplete-backup/
+
+# MCP 打包产物
+mcp/dist/

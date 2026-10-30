@@ -10,10 +10,13 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "vitest run",
-    "check": "vitest run && tsc -b && vite build",
-    "fixtures:scale": "node scripts/generate-scale-fixtures.mjs"
+    "check": "vitest run && tsc -b && vite build && node scripts/build-mcp.mjs",
+    "fixtures:scale": "node scripts/generate-scale-fixtures.mjs",
+    "mcp:build": "node scripts/build-mcp.mjs",
+    "mcp": "node mcp/dist/server.mjs"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2",
     "exceljs": "^4.4.0",
     "lucide-react": "^0.468.0",
     "papaparse": "^5.5.3",

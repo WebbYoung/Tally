@@ -61,7 +61,9 @@ import {
   planSchema,
   reconcile,
 } from "./domain/engine";
-import { aiMapping as requestMapping, aiPlan, aiStatus } from "./domain/gateway";
+import { AgentTrace } from "./components/AgentTrace";
+import type { AgentOutcome } from "./domain/agent";
+import { aiAgent, aiMapping as requestMapping, aiStatus } from "./domain/gateway";
 import { demoProject } from "./domain/demo";
 import { downloadSources, readSpreadsheet } from "./domain/files";
 import { loadState, saveState } from "./domain/storage";
@@ -187,6 +189,8 @@ export default function App() {
   const [ai, setAi] = useState<{ available: boolean; model?: string }>({
     available: false,
   });
+  const [trace, setTrace] = useState<AgentOutcome | null>(null);
+  const [traceOpen, setTraceOpen] = useState(true);
   const [consent, setConsent] = useState(false);
   const [mappingConsent, setMappingConsent] = useState(false);
   const [diffLimit, setDiffLimit] = useState(12);
@@ -460,7 +464,7 @@ export default function App() {
     const request = new AbortController();
     aiRequest.current = request;
     try {
-      const data = await requestMapping(
+      const { mapping, warnings } = await requestMapping(
         source.headers,
         AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
       );
@@ -469,11 +473,23 @@ export default function App() {
         ...p,
         sources: p.sources.map((s) =>
           s.id === source.id
-            ? { ...s, mapping: data.mapping, confirmed: false }
+            ? { ...s, mapping, confirmed: false }
             : s,
         ),
       }));
-      setMessage("AI 建议已填入，请人工核对后确认。");
+      if (!Object.keys(mapping).length) {
+        setError(
+          warnings.length
+            ? `AI 的建议全部被安全护栏拦下：${warnings.join("；")}。请手动映射。`
+            : "AI 未能给出可用映射，请手动选择表头。",
+        );
+        return;
+      }
+      setMessage(
+        warnings.length
+          ? `AI 建议已填入；已拦下 ${warnings.length} 条不合理映射（${warnings.join("；")}），请人工核对。`
+          : "AI 建议已填入，请人工核对后确认。",
+      );
     } catch (e) {
       if (!request.signal.aborted) fail(e);
     } finally {
@@ -497,38 +513,39 @@ export default function App() {
       );
       return;
     }
-    setBusy("AI 正在规划统计参数");
+    if (!display) {
+      setError("请先确认字段映射并生成统计结果，AI 才能读到可用字段。");
+      return;
+    }
+    setBusy("AI 正在读取数据并规划统计");
     setError("");
     setPlan(null);
     setAnalysis(null);
+    setTrace(null);
     aiRequest.current?.abort();
     const request = new AbortController();
     aiRequest.current = request;
     try {
-      const fields = [
-        ...new Set(
-          (display?.sources ?? [])
-            .filter((s) => s.confirmed)
-            .flatMap((s) =>
-              Object.entries(s.mapping)
-                .filter(
-                  ([field, header]) =>
-                    header &&
-                    s.headers.includes(header) &&
-                    ((field !== "channel" && field !== "grade") ||
-                      s.role === "registration"),
-                )
-                .map(([field]) => field),
-            ),
-        ),
-      ];
-      const data = await aiPlan(
+      const outcome = await aiAgent({
         question,
-        fields,
-        AbortSignal.any([request.signal, AbortSignal.timeout(30000)]),
-      );
+        project: display,
+        result: result ?? undefined,
+        snapshot: active,
+        signal: AbortSignal.any([request.signal, AbortSignal.timeout(90000)]),
+      });
       if (request.signal.aborted) return;
-      setPlan(planSchema.parse(data.plan));
+      setTrace(outcome);
+      setTraceOpen(true);
+      if (outcome.plan) {
+        setPlan(outcome.plan);
+        setMessage(
+          `AI 已给出计划：核对 ${outcome.citations.length} 条口径，经 ${
+            outcome.revised ? "自检修正后" : "自检"
+          }放行。`,
+        );
+      } else {
+        setError(outcome.reason || "AI 无法用现有工具回答这个问题。");
+      }
     } catch (e) {
       if (!request.signal.aborted) fail(e);
     } finally {
@@ -1535,9 +1552,16 @@ export default function App() {
                     </div>
                     <p className="subtle">
                       推荐问题直接使用预设参数，不依赖模型；只有点击“生成分析计划”才会请求
-                      AI。
+                      AI。AI 会先在本机检索口径、探查数据，再给出计划，全过程可展开查看。
                     </p>
                   </section>
+                  {trace && (
+                    <AgentTrace
+                      outcome={trace}
+                      open={traceOpen}
+                      onToggle={() => setTraceOpen((v) => !v)}
+                    />
+                  )}
                   {plan && (
                     <section className="panel plan-panel">
                       <div className="panel-head">

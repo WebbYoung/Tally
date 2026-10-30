@@ -86,6 +86,118 @@ async function callModel(messages, tool) {
     throw new Error("模型未返回工具参数，请使用预设分析。");
   return JSON.parse(args);
 }
+/**
+ * 模型代理：浏览器侧的 Agent 需要多步调用模型，但密钥不能进前端。
+ * 这里只转发**受约束的**请求：工具名白名单、温度归零、模型强制用服务端配置。
+ * 业务数据（行、标识）不进这个通道——编排在浏览器里做，工具在浏览器里执行。
+ */
+const PROXY_TOOLS = new Set(["plan_analysis", "map_columns"]);
+const messageSchema = z
+  .object({
+    role: z.enum(["system", "user", "assistant"]),
+    content: z.string().max(24000),
+  })
+  .strict();
+const proxySchema = z
+  .object({
+    /* 客户端会带上自己的配置项；model / temperature 一律由服务端覆盖 */
+    model: z.string().max(64).optional(),
+    temperature: z.number().min(0).max(2).optional(),
+    thinking: z.unknown().optional(),
+    messages: z.array(messageSchema).min(1).max(12),
+    tools: z
+      .array(
+        z
+          .object({
+            type: z.literal("function"),
+            function: z
+              .object({
+                name: z.string().max(64),
+                description: z.string().max(6000).optional(),
+                parameters: z.record(z.string(), z.unknown()),
+              })
+              .strict(),
+          })
+          .strict(),
+      )
+      .min(1)
+      .max(1),
+    tool_choice: z
+      .object({ type: z.literal("function"), function: z.object({ name: z.string() }) })
+      .optional(),
+  })
+  .strict();
+
+async function readBody(req, limit) {
+  let raw = "";
+  for await (const chunk of req) {
+    raw += chunk;
+    if (Buffer.byteLength(raw) > limit) return null;
+  }
+  return raw;
+}
+
+async function proxyCompletion(raw) {
+  const input = proxySchema.parse(JSON.parse(raw));
+  const tool = input.tools[0];
+  const forced = input.tool_choice?.function?.name ?? tool.function.name;
+  if (!PROXY_TOOLS.has(forced) || forced !== tool.function.name)
+    throw Object.assign(new Error("该工具不在代理白名单内。"), { status: 400 });
+  const response = await fetch(
+    process.env.AI_BASE_URL.replace(/\/$/, "") + "/chat/completions",
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.AI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: process.env.AI_MODEL,
+        messages: input.messages,
+        tools: [tool],
+        tool_choice: { type: "function", function: { name: forced } },
+        temperature: 0,
+        thinking: { type: "disabled" },
+      }),
+      signal: AbortSignal.timeout(45000),
+    },
+  );
+  if (!response.ok)
+    throw Object.assign(
+      new Error(
+        response.status === 401 || response.status === 403
+          ? "服务端密钥无效，请检查 .env 中的 AI_API_KEY。"
+          : "模型服务不可用，请稍后重试或使用预设分析。",
+      ),
+      { status: response.status === 429 ? 429 : 502 },
+    );
+  const reader = response.body?.getReader();
+  if (!reader) throw Object.assign(new Error("模型服务返回空响应。"), { status: 502 });
+  let text = "",
+    size = 0;
+  const decoder = new TextDecoder();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 262144) {
+        await reader.cancel();
+        throw Object.assign(new Error("模型响应过大。"), { status: 502 });
+      }
+      text += decoder.decode(value, { stream: true });
+    }
+    text += decoder.decode();
+  } finally {
+    reader.releaseLock();
+  }
+  const data = JSON.parse(text);
+  return {
+    choices: data.choices,
+    usage: data.usage,
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   const send = (status, data) => {
     res.writeHead(status, {
@@ -119,6 +231,29 @@ const server = http.createServer(async (req, res) => {
       available: available(),
       model: available() ? process.env.AI_MODEL : null,
     });
+    return;
+  }
+  if (req.method === "POST" && req.url === "/api/proxy") {
+    if (!req.headers["content-type"]?.startsWith("application/json")) {
+      send(415, { error: "仅接受 JSON。" });
+      return;
+    }
+    if (!available()) {
+      send(503, { error: "云端 AI 尚未配置，请使用预设分析。" });
+      return;
+    }
+    const raw = await readBody(req, 131072);
+    if (raw === null) {
+      send(413, { error: "请求过大。" });
+      return;
+    }
+    try {
+      send(200, await proxyCompletion(raw));
+    } catch (e) {
+      send(e?.status ?? 422, {
+        error: e instanceof Error ? e.message : "代理调用失败。",
+      });
+    }
     return;
   }
   if (
