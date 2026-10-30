@@ -28,9 +28,10 @@ jobs:
       - name: Install dependencies
         run: npm ci --no-audit --no-fund
 
-      - name: Build (project-page base path)
+      - name: Build (project-page base path, static mode)
         env:
           VITE_BASE: /Tally/
+          VITE_STATIC: "1"
         run: npm run build
 
       - name: Disable Jekyll processing

@@ -237,14 +237,18 @@ export default function App() {
       .finally(() => {
         if (!disposed) setLoaded(true);
       });
-    fetch("/api/status")
-      .then((r) => r.json())
-      .then((value) => {
-        if (!disposed) setAi(value);
-      })
-      .catch(() => {
-        if (!disposed) setAi({ available: false });
-      });
+    // 静态部署（GitHub Pages）没有网关进程，直接标记为不可用，避免一次注定 404 的探测请求。
+    if (import.meta.env.VITE_STATIC === "1") {
+      setAi({ available: false });
+    } else
+      fetch("/api/status")
+        .then((r) => r.json())
+        .then((value) => {
+          if (!disposed) setAi(value);
+        })
+        .catch(() => {
+          if (!disposed) setAi({ available: false });
+        });
     return () => {
       disposed = true;
     };
